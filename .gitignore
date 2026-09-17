@@ -1,0 +1,31 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# prisma generated client + local sqlite db
+/src/generated/
+*.db
+*.db-journal
+
+# uploaded media
+/uploads/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+npm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
+
+# old Django/React app, safe to delete
+/_legacy/
+
+# local Claude Code permissions
+.claude/settings.local.json

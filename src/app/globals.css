@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* "Editorial" design tokens: warm paper, ink, one deep-teal accent, hairlines instead of shadows. */
+@theme {
+  --color-paper: #f6f2ea;
+  --color-surface: #fcfaf6;
+  --color-surface-2: #ede7da;
+  --color-line: #dbd3c4;
+  --color-line-strong: #b5ab98;
+  --color-ink: #1b1a17;
+  --color-ink-muted: #665f55;
+  --color-ink-faint: #8a8275;
+
+  --color-accent: #155e63;
+  --color-accent-hover: #0e474b;
+  --color-accent-soft: #dce9e7;
+  --color-accent-ink: #0f4b4f;
+
+  --color-success: #2e6b3f;
+  --color-success-soft: #deebdb;
+  --color-warning: #7a4e0e;
+  --color-warning-soft: #f3e6cc;
+  --color-danger: #8c2b2b;
+  --color-danger-soft: #f3deda;
+
+  --font-display: var(--font-newsreader), var(--font-tiro), Georgia, "Times New Roman", serif;
+  --font-reading: var(--font-newsreader), var(--font-tiro), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-mukta), "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+html {
+  background: var(--color-paper);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display,
+.font-reading {
+  font-optical-sizing: auto;
+}
+
+/* Feather icons: a slightly lighter stroke than the library default. */
+svg[stroke="currentColor"] {
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-ink);
+}
