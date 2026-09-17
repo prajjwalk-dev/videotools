@@ -14,12 +14,13 @@ import { env, uploadPath } from "@/lib/env";
 import { extensionOf, FORMAT_HINT, isAllowedFile } from "@/lib/formats";
 import { ApiError, handle } from "@/lib/api";
 import { createTranscription } from "@/lib/create";
-import { JOB_MAX_DURATION, scheduleProcessing } from "@/lib/jobs";
+import { scheduleProcessing } from "@/lib/jobs";
 import { SPOKEN_LANGUAGE_CODES, type SpokenLanguage } from "@/lib/languages";
 import { ensureUploadDir, storageMode } from "@/lib/storage";
 
 export const runtime = "nodejs";
-export const maxDuration = JOB_MAX_DURATION;
+// Segment config must be a literal for Next.js to pick it up (keep in sync with jobs.ts).
+export const maxDuration = 300;
 
 interface ParsedUpload {
   fields: Record<string, string>;

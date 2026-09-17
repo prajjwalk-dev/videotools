@@ -4,11 +4,12 @@
 import { NextResponse } from "next/server";
 import { ApiError, handle, readJson, type IdParams } from "@/lib/api";
 import { outputOptions } from "@/lib/languages";
-import { JOB_MAX_DURATION, scheduleVariant } from "@/lib/jobs";
+import { scheduleVariant } from "@/lib/jobs";
 import { effectiveStatus, toVariantSummary } from "@/lib/serialize";
 import { findVariant, newId, now, primaryVariant, store, updateDoc, type VariantDoc } from "@/lib/store";
 
-export const maxDuration = JOB_MAX_DURATION;
+// Segment config must be a literal for Next.js to pick it up (keep in sync with jobs.ts).
+export const maxDuration = 300;
 
 export const POST = handle<IdParams>(async (req, { params }) => {
   const { id } = await params;

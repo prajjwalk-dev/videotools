@@ -29,5 +29,4 @@ export function scheduleVariant(transcriptionId: string, script: string): void {
   after(() => exclusive(`variant:${transcriptionId}:${script}`, () => generateVariant(transcriptionId, script)));
 }
 
-/** Route handlers that schedule jobs need this so Vercel keeps the function alive long enough. */
-export const JOB_MAX_DURATION = 300;
+// Route handlers that schedule jobs export `maxDuration = 300` so Vercel keeps the function alive long enough.
