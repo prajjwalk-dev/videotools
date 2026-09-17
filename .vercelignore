@@ -1,0 +1,8 @@
+_legacy
+uploads
+data
+node_modules
+.next
+.env
+.env.local
+*.db

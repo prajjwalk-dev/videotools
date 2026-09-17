@@ -24,8 +24,41 @@ const STATUS_MESSAGES: Record<number, string> = {
   504: "Server took too long to respond, please try again",
 };
 
-/** Uses XHR so we can report upload progress and abort. */
+/** "blob": browser -> Vercel Blob -> /api/files/register (serverless). "multipart": straight to /api/files/upload (local disk). */
+export type UploadMode = "blob" | "multipart";
+
 export function uploadFile(
+  file: File,
+  language: string,
+  onProgress: (pct: number) => void,
+  signal?: AbortSignal,
+  mode: UploadMode = "multipart",
+): Promise<UploadResponse> {
+  return mode === "blob" ? uploadViaBlob(file, language, onProgress, signal) : uploadMultipart(file, language, onProgress, signal);
+}
+
+/** Browser -> Vercel Blob (multipart, resumable per part), then register the blob with the API. */
+async function uploadViaBlob(file: File, language: string, onProgress: (pct: number) => void, signal?: AbortSignal): Promise<UploadResponse> {
+  const { upload } = await import("@vercel/blob/client");
+  const blob = await upload(`uploads/${file.name}`, file, {
+    access: "private",
+    handleUploadUrl: "/api/files/blob",
+    multipart: file.size > 8 * 1024 * 1024,
+    clientPayload: JSON.stringify({ fileName: file.name, contentType: file.type, language }),
+    contentType: file.type || "application/octet-stream",
+    abortSignal: signal,
+    onUploadProgress: ({ percentage }) => onProgress(Math.min(99, Math.round(percentage))),
+  });
+  onProgress(100);
+  return request<UploadResponse>("/api/files/register", {
+    method: "POST",
+    body: JSON.stringify({ url: blob.url, fileName: file.name, contentType: file.type, language }),
+    signal,
+  });
+}
+
+/** Uses XHR so we can report upload progress and abort. */
+function uploadMultipart(
   file: File,
   language: string,
   onProgress: (pct: number) => void,

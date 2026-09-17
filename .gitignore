@@ -5,12 +5,8 @@
 /.next/
 /out/
 
-# prisma generated client + local sqlite db
-/src/generated/
-*.db
-*.db-journal
-
-# uploaded media
+# local data + uploaded media
+/data/
 /uploads/
 
 # env files
@@ -29,3 +25,8 @@ next-env.d.ts
 
 # local Claude Code permissions
 .claude/settings.local.json
+
+# vercel
+.vercel
+
+.env*

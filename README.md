@@ -2,7 +2,7 @@
 
 Upload an audio or video file and get an editable transcript with downloadable captions (SRT, VTT, TXT, JSON). Hindi audio can be delivered as Hindi (Devanagari), Hinglish (Roman) or both — bilingual captions included.
 
-Built with Next.js (App Router, TypeScript, Tailwind), Prisma + SQLite, and Groq's hosted `whisper-large-v3`.
+Built with Next.js (App Router, TypeScript, Tailwind) and Groq's hosted `whisper-large-v3`. No database: each transcription is a JSON document — a file under `data/` locally, a private blob in Vercel Blob when deployed.
 
 ## Features
 
@@ -18,13 +18,12 @@ Built with Next.js (App Router, TypeScript, Tailwind), Prisma + SQLite, and Groq
 ## Setup
 
 ```bash
-npm install                 # also generates the Prisma client
+npm install
 cp .env.example .env        # then put your GROQ_API_KEY in .env
-npm run db:migrate          # creates dev.db (local SQLite)
 npm run dev                 # http://localhost:3000
 ```
 
-Nothing else needs to be installed: ffmpeg is bundled via `ffmpeg-static` and SQLite is embedded.
+Nothing else needs to be installed: ffmpeg is bundled via `ffmpeg-static`; uploads go to `uploads/` and documents to `data/`.
 
 ## Scripts
 
@@ -34,17 +33,16 @@ Nothing else needs to be installed: ffmpeg is bundled via `ffmpeg-static` and SQ
 | `npm run build`      | Production build (`npm start` to serve)   |
 | `npm run lint`       | ESLint                                    |
 | `npm run typecheck`  | TypeScript                                |
-| `npm run db:migrate` | Create/apply migrations in development    |
-| `npm run db:deploy`  | Apply migrations in production            |
-| `npm run db:studio`  | Prisma Studio (browse the database)       |
 
 ## Environment
 
 | Variable             | Default          | Notes                                                   |
 | -------------------- | ---------------- | ------------------------------------------------------- |
-| `DATABASE_URL`       | `file:./dev.db`  | SQLite now; Postgres connection string for Supabase     |
 | `GROQ_API_KEY`       | —                | Required. Free key at https://console.groq.com/keys     |
-| `UPLOAD_DIR`         | `./uploads`      | Where uploaded media is stored                          |
+| `UPLOAD_DIR`         | `./uploads`      | Local mode: where uploaded media is stored              |
+| `DATA_DIR`           | `./data`         | Local mode: where transcription documents are stored    |
+| `STORAGE_MODE`       | auto             | `local` or `blob`; defaults to `blob` on Vercel, `local` elsewhere |
+| `BLOB_READ_WRITE_TOKEN` | —             | Vercel Blob token (added automatically when a store is connected) |
 | `MAX_UPLOAD_SIZE_MB` | `500`            |                                                         |
 | `CHUNK_SECONDS`      | `600`            | Audio longer than this is transcribed in chunks         |
 | `GROQ_TEXT_MODEL`    | `openai/gpt-oss-120b` | Chat model used for Hindi ↔ Hinglish script conversion |
@@ -55,7 +53,9 @@ All routes return JSON unless noted.
 
 | Method | Route                                                | Purpose                                              |
 | ------ | ---------------------------------------------------- | ---------------------------------------------------- |
-| POST   | `/api/files/upload`                                  | multipart `file` + `language` (`auto`, `hi-en`, `hi`, `en`) |
+| POST   | `/api/files/upload`                                  | Local mode: multipart `file` + `language` (`auto`, `hi-en`, `hi`, `en`) |
+| POST   | `/api/files/blob`                                    | Blob mode: token exchange for browser → Vercel Blob uploads |
+| POST   | `/api/files/register`                                | Blob mode: `{ url, fileName, contentType, language }` after the upload |
 | GET    | `/api/transcriptions`                                | List (with per-script status)                        |
 | GET    | `/api/transcriptions/:id`                            | Detail: every script with its segments and captions, plus `outputOptions` |
 | DELETE | `/api/transcriptions/:id`                            | Deletes transcription, media row and file on disk    |
@@ -70,32 +70,26 @@ All routes return JSON unless noted.
 ## Project layout
 
 ```
-prisma/schema.prisma        data model (MediaFile, Transcription, TranscriptVariant, Segment, Caption)
+src/lib/store.ts            document model + storage backends (local files / Vercel Blob)
+src/lib/storage.ts          where media lives (local disk / Vercel Blob) and how the pipeline reads it
 src/app                     pages: /upload, /transcriptions, /transcriptions/[id]
 src/app/api                 route handlers (see table above)
 src/lib/pipeline.ts         background jobs: media -> audio -> Whisper -> primary script; primary -> converted script
+src/lib/jobs.ts             schedules jobs with next/server after() (keeps Vercel functions alive up to maxDuration)
 src/lib/audio.ts            ffmpeg helpers (duration, extraction, chunking)
 src/lib/transcribe.ts       Groq Whisper call, language modes, Hinglish clean-up
 src/lib/convert.ts          Devanagari <-> Roman Hinglish conversion via a Groq chat model
 src/lib/languages.ts        spoken-language options and the rules for which output scripts to offer
 src/lib/captions.ts         SRT/VTT/TXT/JSON generators, merge/split/bilingual helpers
 src/lib/formats.ts          accepted file formats
-src/instrumentation.ts      marks jobs interrupted by a restart as failed
-uploads/                    uploaded media (gitignored)
+src/instrumentation.ts      marks jobs interrupted by a restart as failed (local mode)
+uploads/, data/             local media + documents (gitignored)
 ```
 
-Processing runs inside the Next.js server process (started from the upload route), so the app needs a long-running Node server (`npm run dev` / `npm start`), not a serverless deployment.
+## Deploying on Vercel
 
-## Switching to Supabase (Postgres)
+The project is set up for Vercel: media and documents live in a **private Vercel Blob store**, the browser uploads straight to Blob (so the 4.5 MB function body limit does not apply), and processing runs in `after()` with `maxDuration = 300` on the upload/retry/variants routes. Jobs that go silent for 20 minutes are shown as failed with a retry.
 
-1. `npm install @prisma/adapter-pg` and remove `@prisma/adapter-better-sqlite3`.
-2. In `prisma/schema.prisma` set `provider = "postgresql"`.
-3. In `src/lib/db.ts` replace the adapter:
-   ```ts
-   import { PrismaPg } from "@prisma/adapter-pg";
-   const adapter = new PrismaPg({ connectionString: env.databaseUrl });
-   ```
-4. Set `DATABASE_URL` to the Supabase connection string (use the direct/session-pooler URL for migrations).
-5. Delete `prisma/migrations` (they were generated for SQLite) and run `npm run db:migrate` to create fresh Postgres migrations.
+Environment variables on Vercel: `BLOB_READ_WRITE_TOKEN` (from the connected store), `GROQ_API_KEY`, `GROQ_TEXT_MODEL`, `MAX_UPLOAD_SIZE_MB`, `CHUNK_SECONDS`.
 
-Uploaded media stays on local disk; move it to Supabase Storage separately if needed.
+Limits to keep in mind: one transcription job must finish within the function's max duration (300 s covers roughly an hour of audio), and `/tmp` on a function is 500 MB, so very large videos may need a smaller `MAX_UPLOAD_SIZE_MB`.

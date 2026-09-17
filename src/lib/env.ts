@@ -7,10 +7,10 @@ function num(name: string, fallback: number): number {
 }
 
 export const env = {
-  databaseUrl: process.env.DATABASE_URL ?? "file:./dev.db",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
-  // turbopackIgnore: the directory is runtime config, not something to trace into the bundle.
+  // turbopackIgnore: these directories are runtime config, not something to trace into the bundle.
   uploadDir: path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.UPLOAD_DIR ?? "./uploads"),
+  dataDir: path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env.DATA_DIR ?? "./data"),
   maxUploadBytes: num("MAX_UPLOAD_SIZE_MB", 500) * 1024 * 1024,
   chunkSeconds: num("CHUNK_SECONDS", 600),
   /** Groq chat model used for Hindi <-> Hinglish script conversion. */

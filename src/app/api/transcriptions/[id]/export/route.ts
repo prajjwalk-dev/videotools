@@ -3,7 +3,6 @@
 // `script=both` builds bilingual captions (Devanagari + Roman on separate lines of each cue).
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { ApiError, handle, type IdParams } from "@/lib/api";
 import {
   CAPTION_MIME,
@@ -15,7 +14,10 @@ import {
   type CaptionSegment,
 } from "@/lib/captions";
 import { BILINGUAL, supportsBilingual } from "@/lib/languages";
+import { findVariant, primaryVariant, store, type VariantDoc } from "@/lib/store";
 import { CAPTION_FORMATS, type CaptionFormat } from "@/lib/types";
+
+const toCaptionSegments = (v: VariantDoc): CaptionSegment[] => v.segments.map((s) => ({ start: s.startTime, end: s.endTime, text: s.text }));
 
 export const GET = handle<IdParams>(async (req, { params }) => {
   const { id } = await params;
@@ -29,30 +31,25 @@ export const GET = handle<IdParams>(async (req, { params }) => {
     throw new ApiError(400, `Invalid format. Choose from: ${CAPTION_FORMATS.join(", ")}`);
   }
 
-  const transcription = await prisma.transcription.findUnique({
-    where: { id },
-    include: {
-      mediaFile: true,
-      variants: { include: { captions: { where: { format } }, segments: { orderBy: { index: "asc" } } } },
-    },
-  });
-  if (!transcription) throw new ApiError(404, "Transcription not found");
-  if (transcription.status !== "completed") throw new ApiError(400, "Transcription is not completed yet");
-
-  const primary = transcription.variants.find((v) => v.isPrimary);
+  const doc = await store().get(id);
+  if (!doc) throw new ApiError(404, "Transcription not found");
+  if (doc.status !== "completed") throw new ApiError(400, "Transcription is not completed yet");
+  const primary = primaryVariant(doc);
   if (!primary) throw new ApiError(400, "Transcript is not available");
-  const baseName = transcription.mediaFile.fileName;
+  const baseName = doc.mediaFile.fileName;
 
   // --- Bilingual ------------------------------------------------------------
   if (requestedScript === BILINGUAL) {
     if (!supportsBilingual(primary.script)) throw new ApiError(400, "Bilingual export is only available for Hindi audio");
-    const hi = transcription.variants.find((v) => v.script === "hi" && v.status === "completed");
-    const roman = transcription.variants.find((v) => v.script === "hi-en" && v.status === "completed");
-    if (!hi || !roman) throw new ApiError(400, "Generate both the Hindi and Hinglish versions first");
+    const hi = findVariant(doc, "hi");
+    const roman = findVariant(doc, "hi-en");
+    if (hi?.status !== "completed" || roman?.status !== "completed") {
+      throw new ApiError(400, "Generate both the Hindi and Hinglish versions first");
+    }
     if (hi.segments.length !== roman.segments.length) throw new ApiError(500, "Hindi and Hinglish transcripts are not aligned");
 
-    let content: string;
     const fileName = captionFileName(baseName, format, ".hi+hinglish");
+    let content: string;
     if (format === "json") {
       content = JSON.stringify(
         {
@@ -70,28 +67,26 @@ export const GET = handle<IdParams>(async (req, { params }) => {
         2,
       );
     } else {
-      const toCaption = (v: typeof hi): CaptionSegment[] =>
-        v.segments.map((s) => ({ start: s.startTime, end: s.endTime, text: s.text }));
-      const segments = mergeBilingual(toCaption(hi), toCaption(roman));
+      const segments = mergeBilingual(toCaptionSegments(hi), toCaptionSegments(roman));
       content = generateCaption(format, segments, `${hi.fullText ?? ""}\n\n${roman.fullText ?? ""}`);
     }
     return respond(content, format, fileName, download);
   }
 
   // --- Single script --------------------------------------------------------
-  const variant = requestedScript ? transcription.variants.find((v) => v.script === requestedScript) : primary;
+  const variant = requestedScript ? findVariant(doc, requestedScript) : primary;
   if (!variant || variant.status !== "completed") {
     throw new ApiError(400, requestedScript ? `The "${requestedScript}" version has not been generated yet` : "Transcript is not available");
   }
 
   let content: string;
   let fileName: string;
-  const stored = variant.captions[0];
+  const stored = variant.captions.find((c) => c.format === format);
   if (wordsPerLine === 0 && stored) {
     content = stored.content;
     fileName = stored.fileName;
   } else {
-    const base = variant.segments.map((s) => ({ start: s.startTime, end: s.endTime, text: s.text }));
+    const base = toCaptionSegments(variant);
     const segments = wordsPerLine > 0 ? splitSegmentsByWords(base, wordsPerLine) : mergeShortSegments(base);
     content = generateCaption(format, segments, variant.fullText ?? "");
     fileName = captionFileName(baseName, format, `.${variant.script}${wordsPerLine > 0 ? `_${wordsPerLine}words` : ""}`);

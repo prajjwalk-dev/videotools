@@ -2,19 +2,16 @@
 // After an edit the variant's full text and caption files are rebuilt from its segments.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { ApiError, handle, readJson } from "@/lib/api";
-import { refreshVariantFromSegments } from "@/lib/pipeline";
+import { refreshVariant } from "@/lib/pipeline";
 import { toSegmentDto } from "@/lib/serialize";
+import { updateDoc, type SegmentDoc } from "@/lib/store";
 
 type Params = { params: Promise<{ id: string; segmentId: string }> };
 
 export const PATCH = handle<Params>(async (req, { params }) => {
   const { id, segmentId } = await params;
   const body = await readJson<{ text?: unknown; startTime?: unknown; endTime?: unknown }>(req);
-
-  const segment = await prisma.segment.findFirst({ where: { id: segmentId, variant: { transcriptionId: id } } });
-  if (!segment) throw new ApiError(404, "Segment not found");
 
   const data: { text?: string; startTime?: number; endTime?: number } = {};
   if (body.text !== undefined) {
@@ -29,11 +26,28 @@ export const PATCH = handle<Params>(async (req, { params }) => {
     if (typeof body.endTime !== "number" || body.endTime < 0) throw new ApiError(400, "endTime must be >= 0");
     data.endTime = body.endTime;
   }
-  const start = data.startTime ?? segment.startTime;
-  const end = data.endTime ?? segment.endTime;
-  if (end < start) throw new ApiError(400, "endTime must not be before startTime");
 
-  const updated = await prisma.segment.update({ where: { id: segmentId }, data });
-  await refreshVariantFromSegments(segment.variantId);
-  return NextResponse.json(toSegmentDto(updated));
+  let updated: SegmentDoc | null = null;
+  let problem: ApiError | null = null;
+  const doc = await updateDoc(id, (d) => {
+    const variant = d.variants.find((v) => v.segments.some((s) => s.id === segmentId));
+    const segment = variant?.segments.find((s) => s.id === segmentId);
+    if (!variant || !segment) {
+      problem = new ApiError(404, "Segment not found");
+      return false;
+    }
+    const start = data.startTime ?? segment.startTime;
+    const end = data.endTime ?? segment.endTime;
+    if (end < start) {
+      problem = new ApiError(400, "endTime must not be before startTime");
+      return false;
+    }
+    Object.assign(segment, data);
+    refreshVariant(d.mediaFile.fileName, variant);
+    updated = segment;
+  });
+  if (!doc) throw new ApiError(404, "Transcription not found");
+  if (problem) throw problem;
+
+  return NextResponse.json(toSegmentDto(updated!));
 });

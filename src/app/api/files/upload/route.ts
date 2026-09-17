@@ -1,5 +1,6 @@
 // POST /api/files/upload — multipart { file, language: auto|hi-en|hi|en }. Streams the file to disk,
-// creates the MediaFile + Transcription rows and starts processing in the background.
+// creates the transcription document and starts processing in the background.
+// Used for local/self-hosted runs; on Vercel the browser uploads to Blob and calls /api/files/register.
 
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
@@ -9,14 +10,16 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import busboy from "busboy";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { env, uploadPath } from "@/lib/env";
-import { extensionOf, FORMAT_HINT, isAllowedFile, mediaKind } from "@/lib/formats";
+import { extensionOf, FORMAT_HINT, isAllowedFile } from "@/lib/formats";
 import { ApiError, handle } from "@/lib/api";
-import { startProcessing } from "@/lib/pipeline";
+import { createTranscription } from "@/lib/create";
+import { JOB_MAX_DURATION, scheduleProcessing } from "@/lib/jobs";
 import { SPOKEN_LANGUAGE_CODES, type SpokenLanguage } from "@/lib/languages";
+import { ensureUploadDir, storageMode } from "@/lib/storage";
 
 export const runtime = "nodejs";
+export const maxDuration = JOB_MAX_DURATION;
 
 interface ParsedUpload {
   fields: Record<string, string>;
@@ -86,7 +89,8 @@ function parseMultipart(req: Request): Promise<ParsedUpload> {
 }
 
 export const POST = handle(async (req) => {
-  await fs.mkdir(env.uploadDir, { recursive: true });
+  if (storageMode() !== "local") throw new ApiError(400, "Direct uploads are disabled here; use the Blob upload flow");
+  await ensureUploadDir();
   const { fields, file } = await parseMultipart(req);
 
   if (!file) throw new ApiError(400, "No file was uploaded");
@@ -96,26 +100,17 @@ export const POST = handle(async (req) => {
     throw new ApiError(400, `Invalid language. Choose from: ${SPOKEN_LANGUAGE_CODES.join(", ")}`);
   }
 
-  const mediaFile = await prisma.mediaFile.create({
-    data: {
-      fileName: file.originalName,
-      fileType: mediaKind(file.originalName, file.mimeType),
-      fileFormat: file.ext || file.mimeType.split("/")[1] || "unknown",
-      fileSize: file.size,
-      storagePath: file.storagePath,
-      transcription: { create: { spokenLanguage: language, status: "pending" } },
-    },
-    include: { transcription: true },
+  const doc = await createTranscription({
+    fileName: file.originalName,
+    size: file.size,
+    contentType: file.mimeType,
+    storagePath: file.storagePath,
+    language,
   });
-
-  startProcessing(mediaFile.transcription!.id);
+  scheduleProcessing(doc.id);
 
   return NextResponse.json(
-    {
-      message: "File uploaded successfully. Transcription started.",
-      file_id: mediaFile.id,
-      transcription_id: mediaFile.transcription!.id,
-    },
+    { message: "File uploaded successfully. Transcription started.", file_id: doc.mediaFile.id, transcription_id: doc.id },
     { status: 201 },
   );
 });

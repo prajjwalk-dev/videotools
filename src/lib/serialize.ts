@@ -1,7 +1,7 @@
-// Converts Prisma rows into the JSON shapes the client consumes.
+// Converts stored documents into the JSON shapes the client consumes.
 
-import type { Caption, MediaFile, Segment, Transcription, TranscriptVariant } from "@/generated/prisma/client";
 import { outputOptions, supportsBilingual, type SpokenLanguage } from "./languages";
+import type { CaptionDoc, SegmentDoc, TranscriptionDoc, VariantDoc } from "./store";
 import type {
   CaptionDto,
   CaptionFormat,
@@ -15,80 +15,60 @@ import type {
   VariantSummary,
 } from "./types";
 
-/** Prisma include that loads everything toDetail() needs. */
-export const DETAIL_INCLUDE = {
-  mediaFile: true,
-  variants: {
-    orderBy: { createdAt: "asc" as const },
-    include: { segments: { orderBy: { index: "asc" as const } }, captions: true },
-  },
-};
+/** A job that has not written progress for this long can no longer be running (e.g. the serverless function was cut off). */
+const STALE_MS = 20 * 60 * 1000;
+const STALE_MESSAGE = "Processing was interrupted. Please retry.";
 
-export type VariantFull = TranscriptVariant & { segments: Segment[]; captions: Caption[] };
-export type TranscriptionWithVariants = Transcription & { mediaFile: MediaFile; variants: TranscriptVariant[] };
-export type TranscriptionFull = Transcription & { mediaFile: MediaFile; variants: VariantFull[] };
+/** Status as the user should see it: in-flight jobs that went silent count as failed. */
+export function effectiveStatus(row: { status: string; updatedAt: string }): JobStatus {
+  const status = row.status as JobStatus;
+  if ((status === "processing" || status === "pending") && Date.now() - Date.parse(row.updatedAt) > STALE_MS) return "failed";
+  return status;
+}
 
-export function toMediaFileDto(file: MediaFile): MediaFileDto {
+function effectiveError(row: { status: string; updatedAt: string; errorMessage: string | null }): string | null {
+  return effectiveStatus(row) === "failed" && row.status !== "failed" ? STALE_MESSAGE : row.errorMessage;
+}
+
+export function toMediaFileDto(m: TranscriptionDoc["mediaFile"]): MediaFileDto {
   return {
-    id: file.id,
-    fileName: file.fileName,
-    fileType: file.fileType,
-    fileFormat: file.fileFormat,
-    fileSize: file.fileSize,
-    duration: file.duration,
-    uploadedAt: file.uploadedAt.toISOString(),
+    id: m.id,
+    fileName: m.fileName,
+    fileType: m.fileType,
+    fileFormat: m.fileFormat,
+    fileSize: m.fileSize,
+    duration: m.duration,
+    uploadedAt: m.uploadedAt,
   };
 }
 
-export function toSegmentDto(segment: Segment): SegmentDto {
-  return {
-    id: segment.id,
-    index: segment.index,
-    startTime: segment.startTime,
-    endTime: segment.endTime,
-    text: segment.text,
-    confidence: segment.confidence,
-  };
+export function toSegmentDto(s: SegmentDoc): SegmentDto {
+  return { id: s.id, index: s.index, startTime: s.startTime, endTime: s.endTime, text: s.text, confidence: s.confidence };
 }
 
-export function toCaptionDto(caption: Caption): CaptionDto {
-  return {
-    id: caption.id,
-    format: caption.format as CaptionFormat,
-    fileName: caption.fileName,
-    fileSize: caption.fileSize,
-    createdAt: caption.createdAt.toISOString(),
-  };
+export function toCaptionDto(c: CaptionDoc): CaptionDto {
+  return { id: c.id, format: c.format as CaptionFormat, fileName: c.fileName, fileSize: c.fileSize, createdAt: c.createdAt };
 }
 
-export function toVariantSummary(v: TranscriptVariant): VariantSummary {
+export function toVariantSummary(v: VariantDoc): VariantSummary {
   return {
     id: v.id,
     script: v.script,
-    source: v.source as "whisper" | "converted",
+    source: v.source,
     isPrimary: v.isPrimary,
-    status: v.status as JobStatus,
+    status: effectiveStatus(v),
     progress: v.progress,
-    errorMessage: v.errorMessage,
+    errorMessage: effectiveError(v),
     wordCount: v.wordCount,
   };
 }
 
-export function toVariantDto(v: VariantFull): VariantDto {
-  return {
-    ...toVariantSummary(v),
-    fullText: v.fullText,
-    segments: v.segments.map(toSegmentDto),
-    captions: v.captions.map(toCaptionDto),
-  };
+export function toVariantDto(v: VariantDoc): VariantDto {
+  return { ...toVariantSummary(v), fullText: v.fullText, segments: v.segments.map(toSegmentDto), captions: v.captions.map(toCaptionDto) };
 }
 
-function primaryOf(variants: TranscriptVariant[]): TranscriptVariant | undefined {
-  return variants.find((v) => v.isPrimary);
-}
-
-export function toListItem(t: TranscriptionWithVariants): TranscriptionListItem {
-  const primary = primaryOf(t.variants);
+export function toListItem(t: TranscriptionDoc): TranscriptionListItem {
+  const primary = t.variants.find((v) => v.isPrimary);
   return {
     id: t.id,
     fileName: t.mediaFile.fileName,
@@ -98,38 +78,38 @@ export function toListItem(t: TranscriptionWithVariants): TranscriptionListItem 
     spokenLanguage: t.spokenLanguage as SpokenLanguage,
     detectedLanguage: t.detectedLanguage,
     primaryScript: primary?.script ?? null,
-    status: t.status as JobStatus,
+    status: effectiveStatus(t),
     progress: t.progress,
     stage: t.stage,
     wordCount: primary?.wordCount ?? 0,
-    errorMessage: t.errorMessage,
+    errorMessage: effectiveError(t),
     processingDuration: t.processingDuration,
-    createdAt: t.createdAt.toISOString(),
+    createdAt: t.createdAt,
     variants: t.variants.map(toVariantSummary),
   };
 }
 
-export function toDetail(t: TranscriptionFull): TranscriptionDetail {
+export function toDetail(t: TranscriptionDoc): TranscriptionDetail {
   const { variants: _summaries, ...base } = toListItem(t);
   void _summaries;
-  const primary = primaryOf(t.variants);
+  const primary = t.variants.find((v) => v.isPrimary);
   return {
     ...base,
     mediaFile: toMediaFileDto(t.mediaFile),
-    processingStartedAt: t.processingStartedAt?.toISOString() ?? null,
-    processingCompletedAt: t.processingCompletedAt?.toISOString() ?? null,
+    processingStartedAt: t.processingStartedAt,
+    processingCompletedAt: t.processingCompletedAt,
     outputOptions: primary ? outputOptions(primary.script) : [],
     supportsBilingual: primary ? supportsBilingual(primary.script) : false,
     variants: t.variants.map(toVariantDto),
   };
 }
 
-export function toStatus(t: Transcription & { variants: TranscriptVariant[] }): StatusDto {
+export function toStatus(t: TranscriptionDoc): StatusDto {
   return {
-    status: t.status as JobStatus,
+    status: effectiveStatus(t),
     progress: t.progress,
     stage: t.stage,
-    errorMessage: t.errorMessage,
+    errorMessage: effectiveError(t),
     variants: t.variants.map(toVariantSummary),
   };
 }
