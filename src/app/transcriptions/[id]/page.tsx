@@ -111,6 +111,7 @@ export default function TranscriptionDetailPage() {
   }, [data]);
 
   const chooseScript = async (key: string) => {
+    const previous = selected;
     setChoice(key);
     setShowFull(false);
     setVisibleSegments(SEGMENT_PAGE);
@@ -121,6 +122,8 @@ export default function TranscriptionDetailPage() {
         await api.generateVariant(id, script);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not start conversion");
+        setChoice(previous); // do not leave the control stuck on "Generating…"
+        return;
       }
     }
     if (missing.length) await load();
@@ -303,7 +306,7 @@ export default function TranscriptionDetailPage() {
           ["Size", formatBytes(data.fileSize).replace(/ .*/, ""), formatBytes(data.fileSize).replace(/^[\d.]+ /, "")],
           ["Spoken", spokenLabel, ""],
           ["Processed in", data.processingDuration != null ? `${Math.round(data.processingDuration)}` : "—", data.processingDuration != null ? "s" : ""],
-          ["Words", primary ? primary.wordCount.toLocaleString() : "—", ""],
+          ["Words", displayVariants[0] ? displayVariants[0].wordCount.toLocaleString() : "—", ""],
         ].map(([dt, dd, unit], i) => (
           <div key={dt} className={`min-w-0 ${i > 0 ? "sm:border-l sm:border-line sm:pl-5" : ""}`}>
             <dt className="font-mono text-[11px] tracking-[0.12em] text-ink-muted uppercase">{dt}</dt>
@@ -552,6 +555,8 @@ function SegmentRow({
   const [text2, setText2] = useState(secondary?.segment.text ?? "");
   const [saving, setSaving] = useState(false);
   const firstRef = useRef<HTMLTextAreaElement>(null);
+  const pencilRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
   const toast = useToast();
 
   useEffect(() => {
@@ -559,7 +564,10 @@ function SegmentRow({
       const el = firstRef.current;
       el?.focus();
       el?.setSelectionRange(el.value.length, el.value.length);
+    } else if (wasEditing.current) {
+      pencilRef.current?.focus(); // keyboard users land back on the row they edited
     }
+    wasEditing.current = editing;
   }, [editing]);
 
   const start = () => {
@@ -569,6 +577,7 @@ function SegmentRow({
   };
 
   const save = async () => {
+    if (saving) return;
     const edits: { segmentId: string; text: string }[] = [];
     if (!text1.trim() || (secondary && !text2.trim())) {
       toast.error("A segment cannot be empty");
@@ -610,6 +619,7 @@ function SegmentRow({
   if (editing) {
     return (
       <div className="-ml-4 grid grid-cols-[1fr_auto] gap-x-6 gap-y-3 border-l-2 border-l-accent bg-surface py-5 pr-4 pl-4 md:ml-0 md:grid-cols-[150px_minmax(0,1fr)] md:pr-5 md:pl-5">
+        <button ref={pencilRef} className="sr-only" tabIndex={-1} aria-hidden="true" />
         {timestamp}
         <span className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.12em] text-accent uppercase md:hidden">
           <FiEdit2 className="h-3 w-3" /> Editing
@@ -622,8 +632,9 @@ function SegmentRow({
             onChange={(e) => setText1(e.target.value)}
             onKeyDown={onKey}
             rows={2}
+            disabled={saving}
             lang={primary.devanagari ? "hi" : undefined}
-            className="mt-1.5 block w-full resize-y rounded-md border border-accent bg-paper px-3.5 py-2.5 font-reading text-[19px] leading-[1.65] text-ink ring-2 ring-accent/15 focus:outline-none"
+            className="mt-1.5 block min-h-[5.5rem] w-full resize-y rounded-md border border-accent bg-paper px-3.5 py-2.5 font-reading text-[19px] leading-[1.65] text-ink ring-2 ring-accent/15 field-sizing-content focus:outline-none disabled:opacity-60"
           />
           {secondary && (
             <>
@@ -633,8 +644,9 @@ function SegmentRow({
                 onChange={(e) => setText2(e.target.value)}
                 onKeyDown={onKey}
                 rows={2}
+                disabled={saving}
                 lang={secondary.devanagari ? "hi" : undefined}
-                className="mt-1.5 block w-full resize-y rounded-md border border-line-strong bg-paper px-3.5 py-2.5 font-reading text-[17px] leading-[1.6] text-ink focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none"
+                className="mt-1.5 block min-h-[5rem] w-full resize-y rounded-md border border-line-strong bg-paper px-3.5 py-2.5 font-reading text-[17px] leading-[1.6] text-ink field-sizing-content focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none disabled:opacity-60"
               />
             </>
           )}
@@ -660,8 +672,9 @@ function SegmentRow({
     <div className="group grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 py-5 md:grid-cols-[150px_minmax(0,1fr)_36px]">
       {timestamp}
       <button
+        ref={pencilRef}
         onClick={start}
-        className="order-2 -mt-2 -mr-2 inline-flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-ink md:order-3 md:-mt-1 md:mr-0 md:justify-self-end"
+        className="order-2 -mt-2 -mr-2 inline-flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent md:order-3 md:-mt-1 md:mr-0 md:justify-self-end"
         aria-label="Edit segment"
         title="Edit"
       >

@@ -9,12 +9,13 @@ export interface CaptionSegment {
 }
 
 function splitTime(seconds: number) {
-  const s = Math.max(0, seconds);
+  // Work in integer milliseconds so 7.1 s renders as 07,100 rather than 07,099.
+  const total = Math.round(Math.max(0, seconds) * 1000);
   return {
-    h: Math.floor(s / 3600),
-    m: Math.floor((s % 3600) / 60),
-    s: Math.floor(s % 60),
-    ms: Math.floor((s % 1) * 1000),
+    h: Math.floor(total / 3_600_000),
+    m: Math.floor((total % 3_600_000) / 60_000),
+    s: Math.floor((total % 60_000) / 1000),
+    ms: total % 1000,
   };
 }
 
@@ -149,13 +150,20 @@ export function splitSegmentsByWords(segments: CaptionSegment[], maxWords: numbe
     for (let i = 0; i < words.length; i += maxWords) {
       const chunk = words.slice(i, i + maxWords);
       out.push({
-        start: seg.start + i * perWord,
-        end: seg.start + (i + chunk.length) * perWord,
+        start: round3(seg.start + i * perWord),
+        end: round3(seg.start + (i + chunk.length) * perWord),
         text: chunk.join(" "),
       });
     }
   }
   return out;
+}
+
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/** Segments are single caption lines: collapse any newlines/runs of whitespace. */
+export function normaliseSegmentText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export const CAPTION_MIME: Record<CaptionFormat, string> = {

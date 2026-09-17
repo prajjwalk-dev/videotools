@@ -50,7 +50,12 @@ async function convertLines(lines: string[], from: string, to: string): Promise<
   });
 }
 
-/** Converts every line; retries a batch once, then throws. Output is script-checked for Roman targets. */
+/** A token that mixes Devanagari and Latin letters (e.g. "आसakte") means the model half-converted a word. */
+function hasMixedScriptToken(line: string): boolean {
+  return line.split(/\s+/).some((token) => DEVANAGARI_RE.test(token) && /[A-Za-z]/.test(token.replace(/[^\p{L}]/gu, "")));
+}
+
+/** Converts every line; retries a batch once, then throws. Output is script-checked per target. */
 export async function convertScript(
   lines: string[],
   from: string,
@@ -63,6 +68,7 @@ export async function convertScript(
     let converted: string[];
     try {
       converted = await convertLines(batch, from, to);
+      if (to === "hi" && converted.some(hasMixedScriptToken)) throw new Error("mixed-script tokens in Devanagari output");
     } catch (first) {
       console.warn("[convert] batch failed, retrying:", first instanceof Error ? first.message : first);
       converted = await convertLines(batch, from, to);

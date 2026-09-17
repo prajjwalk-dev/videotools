@@ -65,7 +65,7 @@ All routes return JSON unless noted.
 | PATCH  | `/api/transcriptions/:id/segments/:segmentId`        | `{ text?, startTime?, endTime? }` — rebuilds that script's captions |
 | GET    | `/api/transcriptions/:id/export?format=srt&script=hi-en&download=true&wordsPerLine=4` | Caption file; `script=both` gives bilingual cues |
 | POST   | `/api/transcriptions/:id/regenerate`                 | Rebuild caption files of every script                |
-| POST   | `/api/transcriptions/:id/retry`                      | Re-run a failed job (regenerates derived scripts too) |
+| POST   | `/api/transcriptions/:id/retry`                      | Re-run a failed job; a completed one needs `{ "force": true }` (edits and generated scripts are discarded) |
 
 ## Project layout
 

@@ -11,9 +11,20 @@ import { getDuration, prepareAudio, splitAudio } from "./audio";
 import { convertScript } from "./convert";
 import { normaliseLanguageCode, type SpokenLanguage } from "./languages";
 import { materialize } from "./storage";
-import { findVariant, newId, now, primaryVariant, store, updateDoc, type CaptionDoc, type SegmentDoc, type VariantDoc } from "./store";
+import {
+  findVariant,
+  newId,
+  now,
+  primaryVariant,
+  store,
+  updateDoc,
+  type CaptionDoc,
+  type SegmentDoc,
+  type TranscriptionDoc,
+  type VariantDoc,
+} from "./store";
 import { postProcess, transcribeFile, whisperModeFor, type TranscribedSegment } from "./transcribe";
-import { generateAllFormats, mergeShortSegments, captionFileName, type CaptionSegment } from "./captions";
+import { applyGroups, generateAllFormats, mergeGroups, captionFileName, normaliseSegmentText, type CaptionSegment } from "./captions";
 import type { CaptionFormat } from "./types";
 
 const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
@@ -64,13 +75,19 @@ export async function processTranscription(id: string): Promise<void> {
     for (let i = 0; i < chunks.length; i++) {
       const label = chunks.length > 1 ? `Transcribing (part ${i + 1} of ${chunks.length})` : "Transcribing";
       await setProgress(id, 25 + Math.round((i / chunks.length) * 55), label);
-      const result = await transcribeFile(chunks[i].path, whisperModeFor(spoken, detected), chunks[i].offset);
-      detected ??= normaliseLanguageCode(result.language);
+      let result = await transcribeFile(chunks[i].path, whisperModeFor(spoken, detected), chunks[i].offset);
+      if (detected === null) {
+        detected = normaliseLanguageCode(result.language);
+        // Auto-detect ran the first chunk blind; if the detected language has a better mode
+        // (e.g. Hindi with its script prompt), redo that chunk so it is not transcribed worse than the rest.
+        const pinned = whisperModeFor(spoken, detected);
+        if (spoken === "auto" && pinned.prompt) result = await transcribeFile(chunks[i].path, pinned, chunks[i].offset);
+      }
       segments.push(...result.segments);
       texts.push(result.text);
     }
 
-    const script = whisperModeFor(spoken).script ?? detected ?? "unknown";
+    const script = whisperModeFor(spoken, detected).script ?? detected ?? "unknown";
     let fullText = texts.filter(Boolean).join(" ");
     if (segments.length === 0) segments = [{ start: 0, end: duration, text: fullText, confidence: 1 }];
     ({ text: fullText, segments } = postProcess({ text: fullText, segments, language: script }, script));
@@ -170,7 +187,7 @@ export async function generateVariant(transcriptionId: string, script: string): 
       fullText,
       wordCount: wordCount(fullText),
       segments,
-      captions: buildCaptions(doc.mediaFile.fileName, script, fullText, captionSegments),
+      captions: buildCaptions(doc.mediaFile.fileName, script, fullText, captionSegments, captionGroups(primary)),
     });
     console.log(`[pipeline] ${transcriptionId} variant ${script} completed`);
   } catch (error) {
@@ -180,9 +197,18 @@ export async function generateVariant(transcriptionId: string, script: string): 
   }
 }
 
-/** Builds all four caption formats for one script. */
-export function buildCaptions(mediaFileName: string, script: string, fullText: string, segments: CaptionSegment[]): CaptionDoc[] {
-  const contents = generateAllFormats(mergeShortSegments(segments), fullText);
+/**
+ * Builds all four caption formats for one script. `groups` (from the primary transcript) decides
+ * which short segments merge, so every script's captions line up cue for cue.
+ */
+export function buildCaptions(
+  mediaFileName: string,
+  script: string,
+  fullText: string,
+  segments: CaptionSegment[],
+  groups: number[][] = mergeGroups(segments),
+): CaptionDoc[] {
+  const contents = generateAllFormats(applyGroups(segments, groups), fullText);
   const stamp = now();
   return (Object.keys(contents) as CaptionFormat[]).map((format) => ({
     id: newId(),
@@ -194,15 +220,24 @@ export function buildCaptions(mediaFileName: string, script: string, fullText: s
   }));
 }
 
+/** Merge grouping shared by every script of a document: computed on the primary transcript. */
+export function captionGroups(primary: VariantDoc): number[][] {
+  return mergeGroups(primary.segments.map((s) => ({ start: s.startTime, end: s.endTime, text: s.text })));
+}
+
 /** Recomputes a variant's full text and captions from its (edited) segments. Mutates in place. */
-export function refreshVariant(mediaFileName: string, variant: VariantDoc): void {
+export function refreshVariant(doc: TranscriptionDoc, variant: VariantDoc): void {
+  for (const s of variant.segments) s.text = normaliseSegmentText(s.text);
   variant.fullText = variant.segments.map((s) => s.text).join(" ");
   variant.wordCount = wordCount(variant.fullText);
+  const primary = primaryVariant(doc) ?? variant;
+  const groups = primary.segments.length === variant.segments.length ? captionGroups(primary) : undefined;
   variant.captions = buildCaptions(
-    mediaFileName,
+    doc.mediaFile.fileName,
     variant.script,
     variant.fullText,
     variant.segments.map((s) => ({ start: s.startTime, end: s.endTime, text: s.text })),
+    groups,
   );
   variant.updatedAt = now();
 }

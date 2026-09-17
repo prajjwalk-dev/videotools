@@ -23,17 +23,20 @@ export function handle<Ctx>(fn: (req: Request, ctx: Ctx) => Promise<Response>) {
     } catch (error) {
       if (error instanceof ApiError) return jsonError(error.status, error.message);
       console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, error);
-      return jsonError(500, error instanceof Error ? error.message : "Internal server error");
+      return jsonError(500, "Internal server error");
     }
   };
 }
 
 export type IdParams = { params: Promise<{ id: string }> };
 
-export async function readJson<T>(req: Request): Promise<T> {
+export async function readJson<T extends object>(req: Request): Promise<T> {
+  let parsed: unknown;
   try {
-    return (await req.json()) as T;
+    parsed = await req.json();
   } catch {
     throw new ApiError(400, "Invalid JSON body");
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new ApiError(400, "JSON body must be an object");
+  return parsed as T;
 }

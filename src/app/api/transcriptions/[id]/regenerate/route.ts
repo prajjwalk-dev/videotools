@@ -15,7 +15,7 @@ export const POST = handle<IdParams>(async (_req, { params }) => {
   await updateDoc(id, (d) => {
     for (const v of d.variants) {
       if (v.status !== "completed") continue;
-      refreshVariant(d.mediaFile.fileName, v);
+      refreshVariant(d, v);
       count++;
     }
   });

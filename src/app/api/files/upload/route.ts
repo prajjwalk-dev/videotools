@@ -49,9 +49,15 @@ function parseMultipart(req: Request): Promise<ParsedUpload> {
     });
 
     bb.on("file", (_name, stream, info) => {
-      const ext = extensionOf(info.filename);
-      if (!isAllowedFile(info.filename, info.mimeType)) {
-        fail(new ApiError(400, `"${info.filename}" is not a supported audio/video file. Supported: ${FORMAT_HINT}.`));
+      const filename = info.filename ?? "";
+      const ext = extensionOf(filename);
+      if (!filename) {
+        fail(new ApiError(400, "The file part must have a filename"));
+        stream.resume();
+        return;
+      }
+      if (!isAllowedFile(filename, info.mimeType)) {
+        fail(new ApiError(400, `"${filename}" is not a supported audio/video file. Supported: ${FORMAT_HINT}.`));
         stream.resume();
         return;
       }
@@ -68,14 +74,17 @@ function parseMultipart(req: Request): Promise<ParsedUpload> {
 
       writing = pipeline(stream, createWriteStream(destPath))
         .then(() => {
-          result.file = { originalName: info.filename, ext, mimeType: info.mimeType, storagePath, size };
+          result.file = { originalName: filename, ext, mimeType: info.mimeType, storagePath, size };
         })
         .catch(fail);
     });
 
     bb.on("error", (error: unknown) => fail(error instanceof Error ? error : new Error(String(error))));
 
-    bb.on("close", async () => {
+    let settled = false;
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
       await writing;
       if (failure) {
         if (destPath) await fs.unlink(destPath).catch(() => undefined);
@@ -83,9 +92,21 @@ function parseMultipart(req: Request): Promise<ParsedUpload> {
       } else {
         resolve(result);
       }
-    });
+    };
+    bb.on("close", finish);
 
-    Readable.fromWeb(req.body as unknown as NodeReadableStream).pipe(bb);
+    // A client that disconnects mid-upload must not leave a partial file behind.
+    const source = Readable.fromWeb(req.body as unknown as NodeReadableStream);
+    source.on("error", (error) => {
+      fail(new ApiError(400, `Upload interrupted: ${error.message}`));
+      finish();
+    });
+    req.signal.addEventListener("abort", () => {
+      fail(new ApiError(400, "Upload cancelled"));
+      source.destroy();
+      finish();
+    });
+    source.pipe(bb);
   });
 }
 

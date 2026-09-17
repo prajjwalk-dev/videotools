@@ -1,5 +1,5 @@
 // POST /api/transcriptions/:id/retry — re-run processing for a failed (or stuck) job.
-// Generated output scripts are derived from the audio, so they are rebuilt from scratch too.
+// Re-running a completed job discards edits and generated scripts, so that needs { force: true }.
 
 import { NextResponse } from "next/server";
 import { ApiError, handle, type IdParams } from "@/lib/api";
@@ -10,11 +10,16 @@ import { store, updateDoc } from "@/lib/store";
 // Segment config must be a literal for Next.js to pick it up (keep in sync with jobs.ts).
 export const maxDuration = 300;
 
-export const POST = handle<IdParams>(async (_req, { params }) => {
+export const POST = handle<IdParams>(async (req, { params }) => {
   const { id } = await params;
   const doc = await store().get(id);
   if (!doc) throw new ApiError(404, "Transcription not found");
-  if (effectiveStatus(doc) === "processing") throw new ApiError(409, "Transcription is already processing");
+  const status = effectiveStatus(doc);
+  if (status === "processing") throw new ApiError(409, "Transcription is already processing");
+  if (status === "completed") {
+    const body = (await req.json().catch(() => null)) as { force?: unknown } | null;
+    if (body?.force !== true) throw new ApiError(409, "Transcription is already completed; send { force: true } to re-run it and discard edits");
+  }
 
   await updateDoc(id, (d) => {
     d.status = "pending";

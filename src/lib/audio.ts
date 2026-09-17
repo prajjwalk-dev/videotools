@@ -16,7 +16,8 @@ function runFfmpeg(args: string[], allowFailure = false): Promise<string> {
     execFile(ffmpegBinary(), args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (error, _stdout, stderr) => {
       if (error && !allowFailure) {
         const tail = stderr.trim().split("\n").slice(-6).join("\n");
-        reject(new Error(`ffmpeg failed: ${tail || error.message}`));
+        console.error("[ffmpeg]", tail || error.message);
+        reject(new Error(friendlyFfmpegError(tail)));
         return;
       }
       resolve(stderr);
@@ -24,12 +25,22 @@ function runFfmpeg(args: string[], allowFailure = false): Promise<string> {
   });
 }
 
+/** Turns ffmpeg's diagnostics into a message safe to show users (the raw tail is logged server-side). */
+function friendlyFfmpegError(stderrTail: string): string {
+  if (/does not contain any stream|Output file is empty|matches no streams/i.test(stderrTail)) return "This file has no audio track";
+  if (/Invalid data found|moov atom not found|could not find codec parameters/i.test(stderrTail)) {
+    return "Could not read this media file — it may be corrupt or not a real audio/video file";
+  }
+  return "Could not extract audio from this file";
+}
+
 /** Media duration in seconds, parsed from `ffmpeg -i` output. */
 export async function getDuration(filePath: string): Promise<number> {
   // ffmpeg exits non-zero when no output is given; we only want the probe text.
   const stderr = await runFfmpeg(["-hide_banner", "-i", filePath], true);
   const match = stderr.match(/Duration:\s*(\d+):(\d{2}):(\d{2})(?:\.(\d+))?/);
-  if (!match) throw new Error("Could not read media duration — is the file a valid audio/video file?");
+  if (!match) throw new Error("Could not read this media file — it may be corrupt or not a real audio/video file");
+  if (!/Stream #\d+:\d+.*Audio:/.test(stderr)) throw new Error("This file has no audio track");
   const [, h, m, s, frac] = match;
   return Number(h) * 3600 + Number(m) * 60 + Number(s) + (frac ? Number(`0.${frac}`) : 0);
 }

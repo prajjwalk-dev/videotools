@@ -159,9 +159,9 @@ export default function TranscriptionsPage() {
                         <>
                           <button
                             onClick={() => retry(item)}
-                            disabled={busy || item.status === "processing" || item.status === "pending"}
+                            disabled={busy || item.status !== "failed"}
                             className={item.status === "failed" ? button.iconAccent : button.icon}
-                            title="Retry"
+                            title={item.status === "failed" ? "Retry" : "Retry is available for failed files"}
                             aria-label="Retry"
                           >
                             <FiRefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />

@@ -56,6 +56,10 @@ const PAUSE_THRESHOLD_SECONDS = 0.5;
 const HINGLISH_PROMPT =
   "Namaste. Yeh ek Hinglish transcript hai. Hindi ke shabd Roman script mein likhe hain aur English words English mein, jaise: mujhe yeh jaanna tha ki mere mobile number mein multiple 4 aur 7 kyun nahi hai.";
 
+// Same idea for Devanagari: without a prompt Whisper tends to skip stretches of Hindi speech.
+const HINDI_PROMPT =
+  "नमस्ते। यह एक हिंदी transcript है। English शब्द जैसे mobile number, multiple, problem English में ही लिखे हैं, जैसे: मुझे यह जानना था कि मेरे mobile number में multiple 4 और 7 क्यों नहीं है।";
+
 export interface WhisperMode {
   language?: string;
   prompt?: string;
@@ -69,12 +73,15 @@ export function whisperModeFor(spoken: SpokenLanguage, detected?: string | null)
     case "hi-en":
       return { language: "en", prompt: HINGLISH_PROMPT, script: "hi-en" };
     case "hi":
-      return { language: "hi", script: "hi" };
+      return { language: "hi", prompt: HINDI_PROMPT, script: "hi" };
     case "en":
       return { language: "en", script: "en" };
     case "auto":
       // Once the first chunk has told us the language, pin it so later chunks stay consistent.
-      return detected && detected !== "unknown" ? { language: detected, script: detected } : {};
+      // Hindi-family speech (Whisper often labels it Urdu) is transcribed as Devanagari Hindi.
+      if (!detected || detected === "unknown") return {};
+      if (detected === "hi" || detected === "ur") return { language: "hi", prompt: HINDI_PROMPT, script: "hi" };
+      return { language: detected, script: detected };
   }
 }
 

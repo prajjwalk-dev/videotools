@@ -53,19 +53,40 @@ export default function UploadForm({ mode }: { mode: UploadMode }) {
 
   // The whole page accepts a drop; the browser must never navigate to a dropped file.
   useEffect(() => {
-    const over = (e: globalThis.DragEvent) => e.preventDefault();
+    const over = (e: globalThis.DragEvent) => {
+      e.preventDefault();
+      if (!uploading && e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) setDragging(true);
+    };
+    const leave = (e: globalThis.DragEvent) => {
+      if (!e.relatedTarget) setDragging(false); // left the window
+    };
     const drop = (e: globalThis.DragEvent) => {
       e.preventDefault();
       setDragging(false);
       if (!uploading && e.dataTransfer?.files.length) pick(e.dataTransfer.files);
     };
     window.addEventListener("dragover", over);
+    window.addEventListener("dragleave", leave);
     window.addEventListener("drop", drop);
     return () => {
       window.removeEventListener("dragover", over);
+      window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop);
     };
   }, [pick, uploading]);
+
+  // Leaving the page mid-upload: warn on reload/close, abort on in-app navigation.
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      abortRef.current?.abort();
+    };
+  }, [uploading]);
 
   const dragHandlers = {
     onDragOver: (e: DragEvent<HTMLElement>) => {
@@ -139,7 +160,7 @@ export default function UploadForm({ mode }: { mode: UploadMode }) {
           data-testid="spoken-language"
           className="flex w-full rounded-md border border-line bg-surface-2 p-[3px] sm:w-auto"
         >
-          {(Object.entries(SPOKEN_LANGUAGES) as [SpokenLanguage, string][]).map(([code, label]) => {
+          {(Object.entries(SPOKEN_LANGUAGES) as [SpokenLanguage, string][]).map(([code, label], index, all) => {
             const selected = language === code;
             return (
               <button
@@ -147,10 +168,19 @@ export default function UploadForm({ mode }: { mode: UploadMode }) {
                 type="button"
                 role="radio"
                 aria-checked={selected}
+                tabIndex={selected ? 0 : -1}
                 data-value={code}
                 disabled={uploading}
                 onClick={() => setLanguage(code)}
-                className={`h-8 flex-1 rounded-sm px-2 text-[13px] font-medium transition-colors sm:flex-none sm:px-3.5 sm:text-[14px] ${
+                onKeyDown={(e) => {
+                  const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+                  if (!step) return;
+                  e.preventDefault();
+                  const next = all[(index + step + all.length) % all.length][0];
+                  setLanguage(next);
+                  (e.currentTarget.parentElement?.querySelector(`[data-value="${next}"]`) as HTMLButtonElement | null)?.focus();
+                }}
+                className={`h-8 flex-1 rounded-sm px-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent sm:flex-none sm:px-3.5 sm:text-[14px] ${
                   selected ? "bg-surface text-ink ring-1 ring-line-strong" : "text-ink-muted hover:text-ink"
                 }`}
               >
@@ -176,7 +206,7 @@ export default function UploadForm({ mode }: { mode: UploadMode }) {
             }
           }}
           {...dragHandlers}
-          className={`mt-4 block cursor-pointer rounded-lg border px-6 py-14 text-center transition-colors focus:ring-2 focus:ring-accent/20 focus:outline-none sm:py-20 ${
+          className={`mt-4 block cursor-pointer rounded-lg border px-6 py-14 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:py-20 ${
             dragging
               ? "border-accent bg-accent-soft"
               : fileError

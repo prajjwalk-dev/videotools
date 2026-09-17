@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { ApiError, handle, readJson } from "@/lib/api";
+import { normaliseSegmentText } from "@/lib/captions";
 import { refreshVariant } from "@/lib/pipeline";
 import { toSegmentDto } from "@/lib/serialize";
 import { updateDoc, type SegmentDoc } from "@/lib/store";
@@ -16,14 +17,18 @@ export const PATCH = handle<Params>(async (req, { params }) => {
   const data: { text?: string; startTime?: number; endTime?: number } = {};
   if (body.text !== undefined) {
     if (typeof body.text !== "string" || !body.text.trim()) throw new ApiError(400, "text must be a non-empty string");
-    data.text = body.text.trim();
+    data.text = normaliseSegmentText(body.text);
   }
   if (body.startTime !== undefined) {
-    if (typeof body.startTime !== "number" || body.startTime < 0) throw new ApiError(400, "startTime must be >= 0");
+    if (typeof body.startTime !== "number" || !Number.isFinite(body.startTime) || body.startTime < 0) {
+      throw new ApiError(400, "startTime must be a finite number >= 0");
+    }
     data.startTime = body.startTime;
   }
   if (body.endTime !== undefined) {
-    if (typeof body.endTime !== "number" || body.endTime < 0) throw new ApiError(400, "endTime must be >= 0");
+    if (typeof body.endTime !== "number" || !Number.isFinite(body.endTime) || body.endTime < 0) {
+      throw new ApiError(400, "endTime must be a finite number >= 0");
+    }
     data.endTime = body.endTime;
   }
 
@@ -43,7 +48,7 @@ export const PATCH = handle<Params>(async (req, { params }) => {
       return false;
     }
     Object.assign(segment, data);
-    refreshVariant(d.mediaFile.fileName, variant);
+    refreshVariant(d, variant);
     updated = segment;
   });
   if (!doc) throw new ApiError(404, "Transcription not found");
