@@ -23,6 +23,8 @@ export interface SegmentDto {
   startTime: number;
   endTime: number;
   text: string;
+  /** What Whisper heard before the spelling pass changed it (only when different). */
+  rawText: string | null;
   confidence: number | null;
 }
 
@@ -43,6 +45,8 @@ export interface VariantSummary {
   progress: number;
   errorMessage: string | null;
   wordCount: number;
+  /** The AI spelling pass ran over this transcript. */
+  corrected: boolean;
 }
 
 export interface VariantDto extends VariantSummary {

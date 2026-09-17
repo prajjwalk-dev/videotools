@@ -448,7 +448,11 @@ export default function TranscriptionDetailPage() {
           <Section
             icon={<FiFileText className="h-4 w-4" />}
             title="Transcript"
-            helper="Read it through once before exporting. Edits to segments below update this text."
+            helper={
+              displayVariants[0]?.corrected
+                ? "Spelling was checked by AI after transcription; open a segment to see what Whisper heard. Edits below update this text."
+                : "Read it through once before exporting. Edits to segments below update this text."
+            }
             aside={
               <button onClick={() => copyText(displayText)} className={button.quiet}>
                 {copied ? <FiCheck className="h-4 w-4 text-success" /> : <FiCopy className="h-4 w-4" />} {copied ? "Copied" : "Copy text"}
@@ -636,6 +640,11 @@ function SegmentRow({
             lang={primary.devanagari ? "hi" : undefined}
             className="mt-1.5 block min-h-[5.5rem] w-full resize-y rounded-md border border-accent bg-paper px-3.5 py-2.5 font-reading text-[19px] leading-[1.65] text-ink ring-2 ring-accent/15 field-sizing-content focus:outline-none disabled:opacity-60"
           />
+          {primary.segment.rawText && (
+            <p className="mt-1.5 font-mono text-[12px] text-ink-muted">
+              Whisper heard: <span className="text-ink">{primary.segment.rawText}</span>
+            </p>
+          )}
           {secondary && (
             <>
               <SubLabel className="mt-4">{secondary.label}</SubLabel>

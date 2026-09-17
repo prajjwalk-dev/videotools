@@ -15,6 +15,8 @@ export interface SegmentDoc {
   startTime: number;
   endTime: number;
   text: string;
+  /** Text as Whisper produced it, before the spelling pass (only when it changed). */
+  rawText?: string;
   confidence: number | null;
 }
 
@@ -37,6 +39,8 @@ export interface VariantDoc {
   errorMessage: string | null;
   fullText: string | null;
   wordCount: number;
+  /** True when the AI spelling pass ran over this transcript. */
+  corrected?: boolean;
   createdAt: string;
   updatedAt: string;
   segments: SegmentDoc[];

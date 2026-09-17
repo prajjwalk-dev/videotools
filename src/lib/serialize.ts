@@ -43,7 +43,7 @@ export function toMediaFileDto(m: TranscriptionDoc["mediaFile"]): MediaFileDto {
 }
 
 export function toSegmentDto(s: SegmentDoc): SegmentDto {
-  return { id: s.id, index: s.index, startTime: s.startTime, endTime: s.endTime, text: s.text, confidence: s.confidence };
+  return { id: s.id, index: s.index, startTime: s.startTime, endTime: s.endTime, text: s.text, rawText: s.rawText ?? null, confidence: s.confidence };
 }
 
 export function toCaptionDto(c: CaptionDoc): CaptionDto {
@@ -60,6 +60,7 @@ export function toVariantSummary(v: VariantDoc): VariantSummary {
     progress: v.progress,
     errorMessage: effectiveError(v),
     wordCount: v.wordCount,
+    corrected: v.corrected ?? false,
   };
 }
 

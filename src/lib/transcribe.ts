@@ -60,6 +60,12 @@ const HINGLISH_PROMPT =
 const HINDI_PROMPT =
   "नमस्ते। यह एक हिंदी transcript है। English शब्द जैसे mobile number, multiple, problem English में ही लिखे हैं, जैसे: मुझे यह जानना था कि मेरे mobile number में multiple 4 और 7 क्यों नहीं है।";
 
+/** Appends the domain vocabulary so Whisper spells those terms right; Whisper prompts are limited to ~224 tokens. */
+function withVocabulary(prompt: string): string {
+  if (!env.vocabulary.length) return prompt;
+  return `${prompt} Aksar aane wale shabd: ${env.vocabulary.slice(0, 25).join(", ")}.`;
+}
+
 export interface WhisperMode {
   language?: string;
   prompt?: string;
@@ -71,16 +77,16 @@ export interface WhisperMode {
 export function whisperModeFor(spoken: SpokenLanguage, detected?: string | null): WhisperMode {
   switch (spoken) {
     case "hi-en":
-      return { language: "en", prompt: HINGLISH_PROMPT, script: "hi-en" };
+      return { language: "en", prompt: withVocabulary(HINGLISH_PROMPT), script: "hi-en" };
     case "hi":
-      return { language: "hi", prompt: HINDI_PROMPT, script: "hi" };
+      return { language: "hi", prompt: withVocabulary(HINDI_PROMPT), script: "hi" };
     case "en":
-      return { language: "en", script: "en" };
+      return { language: "en", prompt: env.vocabulary.length ? `Words that come up often: ${env.vocabulary.slice(0, 25).join(", ")}.` : undefined, script: "en" };
     case "auto":
       // Once the first chunk has told us the language, pin it so later chunks stay consistent.
       // Hindi-family speech (Whisper often labels it Urdu) is transcribed as Devanagari Hindi.
       if (!detected || detected === "unknown") return {};
-      if (detected === "hi" || detected === "ur") return { language: "hi", prompt: HINDI_PROMPT, script: "hi" };
+      if (detected === "hi" || detected === "ur") return { language: "hi", prompt: withVocabulary(HINDI_PROMPT), script: "hi" };
       return { language: detected, script: detected };
   }
 }

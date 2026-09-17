@@ -9,6 +9,7 @@ Built with Next.js (App Router, TypeScript, Tailwind) and Groq's hosted `whisper
 - Upload any audio or video file up to 500 MB — MP3, WAV, M4A, OGG/OPUS (WhatsApp voice notes), AAC, FLAC, WMA, AMR, MP4, MOV, MKV, WEBM, AVI and more (streamed to disk, no memory buffering)
 - Audio is extracted and normalised with a bundled ffmpeg, then split into chunks so long files work
 - Spoken language: Auto-detect, Hinglish, Hindi or English. Transcription with word-level timestamps, grouped into caption-sized segments
+- AI spelling pass right after transcription: misheard English words, broken word boundaries ("karto" → "kar do") and inconsistent Hindi spellings are fixed without paraphrasing; the raw Whisper text is kept per segment
 - Output language chosen on the result page, only the options that make sense for the audio: Hindi speech → Hinglish (Roman), Hindi (Devanagari) or both; English speech → English
 - The second script is generated from the primary transcript with a Groq chat model, segment-aligned 1:1, so bilingual captions (Devanagari + Roman in each cue) are exact
 - Live progress with stage names while processing; retry for failed jobs
@@ -45,7 +46,9 @@ Nothing else needs to be installed: ffmpeg is bundled via `ffmpeg-static`; uploa
 | `BLOB_READ_WRITE_TOKEN` | —             | Vercel Blob token (added automatically when a store is connected) |
 | `MAX_UPLOAD_SIZE_MB` | `500`            |                                                         |
 | `CHUNK_SECONDS`      | `600`            | Audio longer than this is transcribed in chunks         |
-| `GROQ_TEXT_MODEL`    | `openai/gpt-oss-120b` | Chat model used for Hindi ↔ Hinglish script conversion |
+| `GROQ_TEXT_MODEL`    | `openai/gpt-oss-120b` | Chat model used for the spelling pass and Hindi ↔ Hinglish conversion |
+| `SPELLING_PASS`      | `on`             | AI spelling pass after every transcription (`off` to disable) |
+| `VOCABULARY`         | numerology, … | Comma-separated words that come up often; fed to Whisper and the spelling pass |
 
 ## API
 
@@ -78,6 +81,7 @@ src/lib/pipeline.ts         background jobs: media -> audio -> Whisper -> primar
 src/lib/jobs.ts             schedules jobs with next/server after() (keeps Vercel functions alive up to maxDuration)
 src/lib/audio.ts            ffmpeg helpers (duration, extraction, chunking)
 src/lib/transcribe.ts       Groq Whisper call, language modes, Hinglish clean-up
+src/lib/correct.ts          AI spelling pass (line-aligned, guarded against rewrites)
 src/lib/convert.ts          Devanagari <-> Roman Hinglish conversion via a Groq chat model
 src/lib/languages.ts        spoken-language options and the rules for which output scripts to offer
 src/lib/captions.ts         SRT/VTT/TXT/JSON generators, merge/split/bilingual helpers

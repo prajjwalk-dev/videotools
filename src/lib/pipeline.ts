@@ -9,6 +9,7 @@ import path from "node:path";
 import { env } from "./env";
 import { getDuration, prepareAudio, splitAudio } from "./audio";
 import { convertScript } from "./convert";
+import { correctLines } from "./correct";
 import { normaliseLanguageCode, type SpokenLanguage } from "./languages";
 import { materialize } from "./storage";
 import {
@@ -92,6 +93,14 @@ export async function processTranscription(id: string): Promise<void> {
     if (segments.length === 0) segments = [{ start: 0, end: duration, text: fullText, confidence: 1 }];
     ({ text: fullText, segments } = postProcess({ text: fullText, segments, language: script }, script));
 
+    // Spelling pass: fixes misheard words and broken word boundaries, line by line.
+    await setProgress(id, 82, "Checking spelling");
+    const rawTexts = segments.map((s) => s.text);
+    const fixed = await correctLines(rawTexts, script);
+    const corrected = fixed.some((t, i) => t !== rawTexts[i]);
+    segments = segments.map((s, i) => ({ ...s, text: fixed[i] }));
+    fullText = segments.map((s) => s.text).join(" ");
+
     await setProgress(id, 90, "Saving transcript and captions");
     const stamp = now();
     const variant: VariantDoc = {
@@ -104,6 +113,7 @@ export async function processTranscription(id: string): Promise<void> {
       errorMessage: null,
       fullText,
       wordCount: wordCount(fullText),
+      corrected,
       createdAt: stamp,
       updatedAt: stamp,
       segments: segments.map((s, index) => ({
@@ -112,6 +122,7 @@ export async function processTranscription(id: string): Promise<void> {
         startTime: s.start,
         endTime: s.end,
         text: s.text,
+        ...(rawTexts[index] !== s.text ? { rawText: rawTexts[index] } : {}),
         confidence: s.confidence,
       })),
       captions: buildCaptions(doc.mediaFile.fileName, script, fullText, segments),
@@ -178,7 +189,7 @@ export async function generateVariant(transcriptionId: string, script: string): 
       setVariant({ progress: 5 + Math.round((done / total) * 85) }).then(() => undefined),
     );
     const fullText = converted.join(" ");
-    const segments: SegmentDoc[] = primary.segments.map((s, i) => ({ ...s, id: newId(), text: converted[i] }));
+    const segments: SegmentDoc[] = primary.segments.map((s, i) => ({ id: newId(), index: s.index, startTime: s.startTime, endTime: s.endTime, text: converted[i], confidence: s.confidence }));
     const captionSegments: CaptionSegment[] = segments.map((s) => ({ start: s.startTime, end: s.endTime, text: s.text }));
 
     await setVariant({
